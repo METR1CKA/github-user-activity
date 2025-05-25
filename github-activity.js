@@ -14,75 +14,83 @@ const helpMenu = `
 // URL de la API de GitHub para obtener la actividad del usuario
 const GITHUB_API_URL = 'https://api.github.com/users/<username>/events'
 
-function pushEvent(event) {
-    const repoName = event?.repo?.name ?? 'Unknown'
+function pushEventFormatter(events) {
+    const dataMap = events.map((ev) => ({
+        type: ev.type,
+        actor: ev.actor.login,
+        repoName: ev.repo.name,
+        actor: ev.actor.login,
+    }))
 
-    const commitCount = event?.payload?.commits?.length ?? 0
-
-    console.log(
-        `- Pushed ${commitCount} commit${
-            commitCount > 1 ? 's' : ''
-        } to ${repoName}`,
-    )
+    return dataMap.reduce((acc, ev) => {
+        const repoName = ev.repoName
+        acc[repoName] = {
+            type: ev.type,
+            actor: ev.actor,
+            count: (acc[repoName]?.count || 0) + 1,
+        }
+        return acc
+    }, {})
 }
 
-function issuesEvent(event) {
-    const repoName = event?.repo?.name ?? 'Unknown'
-
-    const action = event?.payload?.action ?? 'Unknown'
-
-    console.log(
-        `- ${
-            action.charAt(0).toUpperCase() + action.slice(1)
-        } an issue in ${repoName}`,
-    )
+function watchEventFormatter(events) {
+    return events.map((ev) => ({
+        type: ev.type,
+        repoName: ev.repo.name,
+        action: ev.payload.action,
+        isPublicRepo: ev.public,
+        org: ev.org.login,
+    }))
 }
 
-function issueCommentEvent(event) {
-    const repoName = event?.repo?.name ?? 'Unknown'
+function createEventFormatter(events) {
+    const data = events.map((ev) => ({
+        type: ev.type,
+        actor: ev.actor.login,
+        repoName: ev.repo.name,
+        branch: ev.payload.master_branch,
+        description: ev.payload.description,
+        isPublicRepo: ev.public,
+    }))
 
-    console.log(`- Commented on an issue in ${repoName}`)
+    const uniqueRepos = data.reduce((acc, ev) => {
+        const repoKey = ev.repoName
+        if (!acc[repoKey]) {
+            acc[repoKey] = ev
+        }
+        return acc
+    }, {})
+
+    return Object.values(uniqueRepos)
 }
 
-function pullRequestEvent(event) {
-    const repoName = event?.repo?.name ?? 'Unknown'
+function getEventsByType(dataEvents) {
+    const eventTypes = dataEvents.map((event) => event.type)
 
-    const action = event?.payload?.action ?? 'Unknown'
+    const setEventTypes = new Set(eventTypes)
 
-    console.log(
-        `- ${
-            action.charAt(0).toUpperCase() + action.slice(1)
-        } a pull request in ${repoName}`,
-    )
+    const uniqueEventTypes = [...setEventTypes]
+
+    const objectEventTypes = {}
+
+    for (let eventType of uniqueEventTypes) {
+        objectEventTypes[eventType] = dataEvents.filter(
+            (event) => event.type === eventType,
+        )
+    }
+
+    return objectEventTypes
 }
 
-function watchEvent(event) {
-    const repoName = event?.repo?.name ?? 'Unknown'
+function getEventsByTypeFormatted(eventByType) {
+    const eventByTypeFormatted = {}
 
-    console.log(`- Watched ${repoName}`)
-}
+    for (let event in eventByType) {
+        let data = eventByType[event]
+        eventByTypeFormatted[event] = eventFormatter[event](data)
+    }
 
-function createEvent(event) {
-    const repoName = event?.repo?.name ?? 'Unknown'
-
-    console.log(`- Created a repository ${repoName}`)
-}
-
-function forkEvent(event) {
-    const repoName = event?.repo?.name ?? 'Unknown'
-
-    console.log(`- Forked a repository ${repoName}`)
-}
-
-// Objeto que contiene las funciones para cada tipo de evento
-const events = {
-    PushEvent: pushEvent,
-    IssuesEvent: issuesEvent,
-    IssueCommentEvent: issueCommentEvent,
-    PullRequestEvent: pullRequestEvent,
-    WatchEvent: watchEvent,
-    CreateEvent: createEvent,
-    ForkEvent: forkEvent,
+    return eventByTypeFormatted
 }
 
 // Función para obtener la actividad del usuario
@@ -90,6 +98,55 @@ async function getUserActivity(username) {
     const URL = GITHUB_API_URL.replace('<username>', username)
 
     return await fetch(URL, { method: 'GET' })
+}
+
+function pushEvent(eventObject) {
+    for (let repoName in eventObject) {
+        const event = eventObject[repoName]
+
+        console.log(
+            `- ${event.type}: ${event.count} commits to ${repoName} by ${event.actor}`,
+        )
+    }
+}
+
+function watchEvent(events) {
+    for (let event of events) {
+        console.log(
+            `- ${event.type}: ${event.action} ${
+                event.isPublicRepo ? 'public' : 'private'
+            } ${event.repoName} by ${event.org}`,
+        )
+    }
+}
+
+function createEvent(events) {
+    for (let event of events) {
+        console.log(
+            `- ${event.type}: ${
+                event.isPublicRepo ? 'Public' : 'Private'
+            } repo ${event.repoName} created in branch ${event.branch} by ${
+                event.actor
+            }${
+                event.description
+                    ? ` with description: ${event.description}`
+                    : ''
+            }`,
+        )
+    }
+}
+
+const eventFormatter = {
+    PushEvent: pushEventFormatter,
+    WatchEvent: watchEventFormatter,
+    CreateEvent: createEventFormatter,
+}
+
+// Objeto que contiene las funciones para cada tipo de evento
+const events = {
+    PushEvent: pushEvent,
+    WatchEvent: watchEvent,
+    CreateEvent: createEvent,
 }
 
 // Función principal
@@ -120,7 +177,9 @@ async function main() {
             process.exit(1)
         }
 
-        dataEvents = await response.json()
+        const data = await response.json()
+
+        dataEvents = [...data]
     } catch (error) {
         console.error('Error fetching user activity:', error)
         process.exit(1)
@@ -131,8 +190,13 @@ async function main() {
         process.exit(0)
     }
 
-    for (let event of dataEvents) {
-        events[event.type](event)
+    const eventByType = getEventsByType(dataEvents)
+
+    const eventByTypeFormatted = getEventsByTypeFormatted(eventByType)
+
+    for (let event in eventByTypeFormatted) {
+        const dataFormatted = eventByTypeFormatted[event]
+        events[event](dataFormatted)
     }
 }
 
