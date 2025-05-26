@@ -16,9 +16,9 @@ const GITHUB_API_URL = 'https://api.github.com/users/<username>/events'
 
 // Función para obtener los eventos agrupados por tipo de evento
 function getEventsByType(dataEvents) {
-    const eventTypes = dataEvents.map((event) => event.type)
+    const eventsByType = dataEvents.map((event) => event.type)
 
-    const setEventTypes = new Set(eventTypes)
+    const setEventTypes = new Set(eventsByType)
 
     const uniqueEventTypes = [...setEventTypes]
 
@@ -27,17 +27,13 @@ function getEventsByType(dataEvents) {
     for (let eventType of uniqueEventTypes) {
         const formatter = eventFormatter[eventType]
 
-        if (!formatter) {
-            continue
-        }
+        if (!formatter) continue
 
         const dataFiltered = dataEvents.filter(
             (event) => event.type === eventType,
         )
 
-        const dataFormatted = formatter(dataFiltered)
-
-        objectEventTypes[eventType] = dataFormatted
+        objectEventTypes[eventType] = formatter(dataFiltered)
     }
 
     return objectEventTypes
@@ -54,10 +50,10 @@ async function getUserActivity(username) {
 const eventFormatter = {
     PushEvent: (events) => {
         const dataMap = events.map((ev) => ({
-            type: ev.type,
-            actor: ev.actor.login,
-            repoName: ev.repo.name,
-            actor: ev.actor.login,
+            type: ev?.type ?? 'No type',
+            actor: ev?.actor?.login ?? 'Unknown',
+            repoName: ev?.repo?.name ?? 'Unknown',
+            actor: ev?.actor?.login ?? 'Unknown',
         }))
 
         return dataMap.reduce((acc, ev) => {
@@ -72,21 +68,21 @@ const eventFormatter = {
     },
     WatchEvent: (events) => {
         return events.map((ev) => ({
-            type: ev.type,
-            repoName: ev.repo.name,
-            action: ev.payload.action,
-            isPublicRepo: ev.public,
-            org: ev.org.login,
+            type: ev?.type ?? 'No type',
+            repoName: ev?.repo?.name ?? 'Unknown',
+            action: ev?.payload?.action ?? 'Unknown',
+            isPublicRepo: ev?.public ?? false,
+            org: ev?.org?.login ?? 'Unknown',
         }))
     },
     CreateEvent: (events) => {
         const data = events.map((ev) => ({
-            type: ev.type,
-            actor: ev.actor.login,
-            repoName: ev.repo.name,
-            branch: ev.payload.master_branch,
-            description: ev.payload.description,
-            isPublicRepo: ev.public,
+            type: ev?.type ?? 'No type',
+            actor: ev?.actor?.login ?? 'Unknown',
+            repoName: ev?.repo?.name ?? 'Unknown',
+            branch: ev?.payload?.master_branch ?? 'Unknown',
+            description: ev?.payload?.description ?? null,
+            isPublicRepo: ev?.public ?? false,
         }))
 
         const uniqueRepos = data.reduce((acc, ev) => {
@@ -117,7 +113,9 @@ const events = {
             console.log(
                 `- ${event.type}: ${event.action} ${
                     event.isPublicRepo ? 'public' : 'private'
-                } ${event.repoName} by ${event.org}`,
+                } ${event.repoName}${
+                    !event.org.includes('Unknown') ? ` by ${event.org}` : ''
+                }`,
             )
         }
     },
@@ -168,7 +166,7 @@ async function main() {
 
         const data = await response.json()
 
-        dataEvents = [...data]
+        dataEvents = Array.isArray(data) ? [...data] : []
     } catch (error) {
         console.error('Error fetching user activity:', error)
         process.exit(1)
@@ -179,18 +177,16 @@ async function main() {
         process.exit(0)
     }
 
-    const eventByType = getEventsByType(dataEvents)
+    const eventsByType = getEventsByType(dataEvents)
 
-    for (let event in eventByType) {
-        const eventFn = events[event]
+    for (let event in eventsByType) {
+        const eventFunc = events[event]
 
-        if (!eventFn) {
-            continue
-        }
+        if (!eventFunc) continue
 
-        const data = eventByType[event]
+        const data = eventsByType[event]
 
-        eventFn(data)
+        eventFunc(data)
     }
 }
 
